@@ -31,7 +31,7 @@ def width(count: int) -> int:
 def safe_rel(path: Path, root: Path) -> str:
     value = path.relative_to(root).as_posix()
     if not value or value == ".":
-        raise ValueError("入力フォルダ自身はアーカイブしません")
+        raise ValueError("The input folder itself is not included in the archive")
     return value
 
 
@@ -61,9 +61,9 @@ def make_short_tree(source: Path, staging: Path, mode: str) -> list[tuple[str, s
 
         for index, child in enumerate(files, 1):
             if child.is_symlink():
-                raise ValueError(f"シンボリックリンクには対応していません: {child}")
+                raise ValueError(f"Symbolic links are not supported: {child}")
             if not child.is_file():
-                raise ValueError(f"通常ファイル以外には対応していません: {child}")
+                raise ValueError(f"Special files are not supported: {child}")
             suffix = extension(child.name)
             numbered_name = f"{len(dirs) + index:0{digits}d}{suffix}"
             short_name = (
@@ -96,7 +96,7 @@ def zip_directory(staging: Path, output: Path) -> None:
 def rar_directory(staging: Path, output: Path) -> None:
     rar = shutil.which("rar")
     if not rar:
-        raise RuntimeError("RAR圧縮にはRARコマンドが必要です（rarがPATHにありません）")
+        raise RuntimeError("RAR compression requires the rar command (not found in PATH)")
     subprocess.run(
         [rar, "a", "-idq", str(output), "."],
         cwd=staging,
@@ -106,9 +106,9 @@ def rar_directory(staging: Path, output: Path) -> None:
 
 def compress(source: Path, output: Path, mode: str) -> None:
     if not source.is_dir():
-        raise ValueError("圧縮元はフォルダで指定してください")
+        raise ValueError("The compression source must be a folder")
     if output.exists():
-        raise FileExistsError(f"出力先は既に存在します: {output}")
+        raise FileExistsError(f"The output already exists: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="pathless-") as temporary:
         staging = Path(temporary) / "archive"
@@ -119,7 +119,7 @@ def compress(source: Path, output: Path, mode: str) -> None:
         elif output.suffix.lower() == ".rar":
             rar_directory(staging, output)
         else:
-            raise ValueError("出力拡張子は .zip または .rar にしてください")
+            raise ValueError("The output extension must be .zip or .rar")
 
 
 def archive_members(path: Path) -> list[str]:
@@ -133,13 +133,13 @@ def archive_members(path: Path) -> list[str]:
                 return archive.namelist()
         except ImportError:
             return []
-    raise ValueError("入力拡張子は .zip または .rar にしてください")
+    raise ValueError("The input extension must be .zip or .rar")
 
 
 def validate_member(name: str) -> PurePosixPath:
     path = PurePosixPath(name)
     if path.is_absolute() or ".." in path.parts:
-        raise ValueError(f"安全でないアーカイブパスです: {name}")
+        raise ValueError(f"Unsafe archive path: {name}")
     return path
 
 
@@ -161,7 +161,7 @@ def extract_zip(source: Path, destination: Path) -> None:
 def rar_command() -> str:
     command = shutil.which("unrar")
     if not command:
-        raise RuntimeError("RAR解凍にはunrarが必要です")
+        raise RuntimeError("RAR extraction requires unrar")
     return command
 
 
@@ -179,7 +179,7 @@ def rar_members(source: Path) -> tuple[list[str], set[str], set[str], dict[str, 
     result = subprocess.run([command, "lb", "-scu", str(source)], capture_output=True, env=rar_env())
     if result.returncode:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
-        raise RuntimeError(f"RAR一覧取得に失敗しました（終了コード{result.returncode}）: {detail}")
+        raise RuntimeError(f"Failed to list RAR contents (exit code {result.returncode}): {detail}")
     members = [
         line.decode("utf-8", errors="surrogateescape").rstrip("\r\n")
         for line in result.stdout.splitlines()
@@ -188,14 +188,14 @@ def rar_members(source: Path) -> tuple[list[str], set[str], set[str], dict[str, 
     if not members:
         detail = result.stderr.decode("utf-8", errors="replace").strip()
         suffix = f": {detail}" if detail else ""
-        raise RuntimeError(f"RAR内のファイル一覧が空です{suffix}")
+        raise RuntimeError(f"The RAR archive contains no files{suffix}")
 
     # `lb` does not reliably mark directory entries. Read the technical
     # listing as well so directories are never sent to `unrar p`.
     technical = subprocess.run([command, "lt", "-scu", str(source)], capture_output=True, env=rar_env())
     if technical.returncode:
         detail = technical.stderr.decode("utf-8", errors="replace").strip()
-        raise RuntimeError(f"RAR詳細一覧取得に失敗しました（終了コード{technical.returncode}）: {detail}")
+        raise RuntimeError(f"Failed to read detailed RAR contents (exit code {technical.returncode}): {detail}")
     types: dict[str, str] = {}
     sizes: dict[str, int] = {}
     current: str | None = None
@@ -212,7 +212,7 @@ def rar_members(source: Path) -> tuple[list[str], set[str], set[str], dict[str, 
     directories = {name for name, entry_type in types.items() if entry_type == "Directory"}
     files = {name for name, entry_type in types.items() if entry_type == "File"}
     if not types or not files and not directories:
-        raise RuntimeError("RAR内のファイル種別を判定できませんでした")
+        raise RuntimeError("Could not determine the RAR entry types")
     return members, directories, files, sizes
 
 
@@ -306,21 +306,21 @@ def extract_rar(source: Path, destination: Path) -> None:
         for raw_member, parts in files:
             key = "/".join(parts)
             if parts not in file_targets or key not in sizes:
-                raise RuntimeError(f"RARのサイズ情報がありません: {key}")
+                raise RuntimeError(f"RAR size information is missing: {key}")
             target = file_targets[parts]
             remaining = sizes[key]
             with target.open("wb") as output:
                 while remaining:
                     chunk = process.stdout.read(min(1024 * 1024, remaining))
                     if not chunk:
-                        raise RuntimeError(f"RARのデータが途中で終了しました: {key}")
+                        raise RuntimeError(f"RAR data ended prematurely: {key}")
                     output.write(chunk)
                     remaining -= len(chunk)
     finally:
         process.stdout.close()
     return_code = process.wait()
     if return_code:
-        raise RuntimeError(f"RARデータの読み出しに失敗しました（終了コード{return_code}）")
+        raise RuntimeError(f"Failed to read RAR data (exit code {return_code})")
     write_manifest(destination, entries)
 
 
@@ -328,7 +328,7 @@ def copy_tree_contents(source: Path, destination: Path) -> None:
     for child in source.iterdir():
         target = destination / child.name
         if child.is_symlink():
-            raise ValueError(f"シンボリックリンクには対応していません: {child}")
+            raise ValueError(f"Symbolic links are not supported: {child}")
         if child.is_dir():
             shutil.copytree(child, target)
         else:
@@ -340,7 +340,7 @@ def decompress(source: Path, destination: Path) -> None:
         raise FileNotFoundError(source)
     if destination.exists():
         if any(destination.iterdir()):
-            raise FileExistsError(f"解凍先は空のフォルダである必要があります: {destination}")
+            raise FileExistsError(f"The extraction destination must be an empty folder: {destination}")
     else:
         destination.mkdir(parents=True)
     with tempfile.TemporaryDirectory(prefix="pathless-extract-") as temporary:
@@ -350,7 +350,7 @@ def decompress(source: Path, destination: Path) -> None:
         elif source.suffix.lower() == ".rar":
             extract_rar(source, staging)
         else:
-            raise ValueError("入力拡張子は .zip または .rar にしてください")
+            raise ValueError("The input extension must be .zip or .rar")
 
         if (staging / MANIFEST).is_file():
             copy_tree_contents(staging, destination)
@@ -364,17 +364,17 @@ def default_destination(archive: Path) -> Path:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="長いパスを短い連番パスにしてZIP/RAR化します")
+    parser = argparse.ArgumentParser(description="Compress and extract ZIP/RAR archives using short sequential paths")
     commands = parser.add_subparsers(dest="command", required=True)
-    compress_parser = commands.add_parser("compress", aliases=["c"], help="フォルダを圧縮")
+    compress_parser = commands.add_parser("compress", aliases=["c"], help="Compress a folder")
     compress_parser.add_argument("source", type=Path)
-    compress_parser.add_argument("destination", type=Path, nargs="?", help="出力アーカイブ")
-    compress_parser.add_argument("-o", "--output", dest="output_option", type=Path, help="出力アーカイブ")
-    compress_parser.add_argument("--mode", choices=["all", "long"], default="all", help="短縮対象（既定: all）")
-    decompress_parser = commands.add_parser("decompress", aliases=["d"], help="アーカイブを空のフォルダへ解凍")
+    compress_parser.add_argument("destination", type=Path, nargs="?", help="Output archive")
+    compress_parser.add_argument("-o", "--output", dest="output_option", type=Path, help="Output archive")
+    compress_parser.add_argument("--mode", choices=["all", "long"], default="all", help="Shortening mode (default: all)")
+    decompress_parser = commands.add_parser("decompress", aliases=["d"], help="Extract an archive into an empty folder")
     decompress_parser.add_argument("archive", type=Path)
-    decompress_parser.add_argument("destination", type=Path, nargs="?", help="解凍先フォルダ")
-    decompress_parser.add_argument("-o", "--output", dest="output_option", type=Path, help="解凍先フォルダ")
+    decompress_parser.add_argument("destination", type=Path, nargs="?", help="Extraction destination")
+    decompress_parser.add_argument("-o", "--output", dest="output_option", type=Path, help="Extraction destination")
     return parser
 
 
@@ -383,21 +383,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command in ("compress", "c"):
             if args.destination is not None and args.output_option is not None:
-                raise ValueError("出力先は位置引数または--outputのどちらか一方で指定してください")
+                raise ValueError("Specify the output either as a positional argument or with --output, not both")
             output = args.destination or args.output_option
             if output is None:
-                raise ValueError("出力アーカイブを指定してください")
+                raise ValueError("An output archive is required")
             compress(args.source, output, args.mode)
             print(output)
         else:
             if args.destination is not None and args.output_option is not None:
-                raise ValueError("解凍先は位置引数または--outputのどちらか一方で指定してください")
+                raise ValueError("Specify the extraction destination either as a positional argument or with --output, not both")
             destination = args.destination or args.output_option or default_destination(args.archive)
             decompress(args.archive, destination)
             print(destination)
         return 0
     except (OSError, ValueError, RuntimeError, subprocess.CalledProcessError) as error:
-        print(f"エラー: {error}", file=sys.stderr)
+        print(f"Error: {error}", file=sys.stderr)
         return 1
 
 
